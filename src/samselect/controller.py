@@ -17,6 +17,7 @@ Krita does not let Python register tools, so SAM Select behaves like one:
 from __future__ import annotations
 
 import time
+import traceback
 from pathlib import Path
 
 from krita import Krita
@@ -91,6 +92,10 @@ class SamSelectTool(QObject):
         self._cursor_timer = QTimer(self)
         self._cursor_timer.setSingleShot(True)
         self._cursor_timer.timeout.connect(self._apply_cursor)
+        self._stroke_watchdog = QTimer(self)
+        self._stroke_watchdog.setInterval(120)
+        self._stroke_watchdog.timeout.connect(self._check_stroke)
+        QApplication.instance().applicationStateChanged.connect(self._on_app_state)
 
         self.options = ToolOptionsWidget()
         self.options.modeChanged.connect(lambda _m: self._apply_cursor())
@@ -241,7 +246,7 @@ class SamSelectTool(QObject):
         QApplication.instance().removeEventFilter(self)
         self._hover_timer.stop()
         self.backend.drop("hover")
-        self._press = None
+        self._cancel_stroke()
         if self.overlay is not None:
             self.overlay.detach()
         if self.prompt is not None:
@@ -259,6 +264,7 @@ class SamSelectTool(QObject):
     def _on_canvas_destroyed(self, *_args) -> None:
         self.canvas = None
         self.overlay = self.prompt = None
+        self._cancel_stroke()
         QApplication.instance().removeEventFilter(self)
 
     def shutdown(self) -> None:
@@ -279,14 +285,25 @@ class SamSelectTool(QObject):
         t = event.type()
         if t in KEYS:
             return self._on_key(obj, event, t)
+        if t == QEvent.TabletLeaveProximity:  # sent to the application, not the canvas
+            if self._press is not None and self._press["tablet"]:
+                self._end_stroke()
+            return False
         if obj is not self.canvas:
             return False
         if t in POINTER:
-            return self._on_pointer(event, t)
+            try:
+                return self._on_pointer(event, t)
+            except Exception:  # noqa: BLE001 - never leave a stroke half-open
+                self._cancel_stroke()
+                traceback.print_exc()
+                return False
         if t == QEvent.Enter:
             self._apply_cursor()
         elif t == QEvent.Leave:
             self._clear_hover()
+        elif t == QEvent.FocusOut and self._press is not None and event.reason() != Qt.PopupFocusReason:
+            self._cancel_stroke()  # a dialog or another window took over mid-stroke
         elif t == QEvent.CursorChange:
             # Krita's tools re-set their cursor (e.g. 100 ms after a modifier
             # key); put ours back once the dust settles.
@@ -302,9 +319,7 @@ class SamSelectTool(QObject):
         elif key in MODIFIER_KEYS:
             self._cursor_timer.start(0)
         elif key == Qt.Key_Escape and t == QEvent.KeyPress and self._press is not None:
-            self._press = None
-            if self.overlay is not None:
-                self.overlay.set_lasso(None)
+            self._cancel_stroke()
             return True
         return False
 
@@ -314,24 +329,20 @@ class SamSelectTool(QObject):
             self.overlay.image_to_widget = tf
             self.overlay.update()
 
+    @staticmethod
+    def _left_held(event, tablet: bool) -> bool:
+        if event.buttons() & Qt.LeftButton:
+            return True
+        # Some tablet drivers report no buttons mid-stroke; pressure still tells.
+        return tablet and event.pressure() > 0.0
+
     def _on_pointer(self, event, t) -> bool:
         tablet = t in TABLET
         pos = QPointF(event.posF() if tablet else event.localPos())
         if t in PRESS:
             if event.button() != Qt.LeftButton or self._space:
                 return False
-            self._clear_hover()
-            self.canvas.setFocus(Qt.MouseFocusReason)
-            img = cv.to_image(self.view, pos)
-            self._press = {
-                "pos": pos,
-                "img": img,
-                "mode": self._current_mode(int(event.modifiers())),
-                "tablet": tablet,
-                "drag": False,
-                "path": [img],  # freehand lasso, image coordinates
-                "last": pos,
-            }
+            self._begin_stroke(event, pos, tablet)
             event.accept()
             return True
         if t in MOVE:
@@ -339,31 +350,99 @@ class SamSelectTool(QObject):
                 if not (event.buttons() & Qt.LeftButton):
                     self._hover_at(pos)
                 return False
-            press = self._press
-            limit = DRAG_THRESHOLD_TABLET if press["tablet"] else DRAG_THRESHOLD
-            if not press["drag"] and (pos - press["pos"]).manhattanLength() >= limit:
-                press["drag"] = True
-            if press["drag"] and (pos - press["last"]).manhattanLength() >= LASSO_STEP:
-                press["path"].append(cv.to_image(self.view, pos))
-                press["last"] = pos
-                self._sync_overlay()
-                self.overlay.set_lasso(press["path"])
+            if not self._left_held(event, tablet):
+                # We never saw the release (lost to another window, a driver
+                # quirk...): the button is up now, so finish where it went up.
+                self._end_stroke(pos)
+                return False
+            self._update_stroke(pos)
             event.accept()
             return True
         if t in RELEASE:
-            if self._press is None or event.button() != Qt.LeftButton:
+            if self._press is None:
                 return False
-            press, self._press = self._press, None
-            self.overlay.set_lasso(None)
-            if press["drag"]:
-                press["path"].append(cv.to_image(self.view, pos))
-                self._finish_lasso(press, pos)
-            else:
-                self._finish_click(press, pos)
+            # Tablet drivers may report NoButton on pen-up; what matters is
+            # that the left button (tip) is no longer held.
+            if event.button() != Qt.LeftButton and self._left_held(event, tablet):
+                return False  # another button went up mid-stroke; Krita owns it
+            self._end_stroke(pos)
             event.accept()
-            self._cursor_timer.start(0)
             return True
         return False
+
+    # -------------------------------------------------------------- strokes
+    #
+    # A stroke is one left-button press: it becomes a click or a freehand
+    # lasso. It always ends through _end_stroke (commit) or _cancel_stroke,
+    # and several independent signals can end it, so a single missed release
+    # can never leave the tool drawing a lasso with no button held:
+    #   release event · a move with the button up · tablet leaving proximity ·
+    #   Escape · focus lost / app deactivated (cancel) · a watchdog that polls
+    #   Qt's button state for mouse strokes · detaching from the canvas.
+
+    def _begin_stroke(self, event, pos: QPointF, tablet: bool) -> None:
+        if self._press is not None:
+            self._cancel_stroke()  # a stale stroke whose release never arrived
+        self._clear_hover()
+        self.canvas.setFocus(Qt.MouseFocusReason)
+        img = cv.to_image(self.view, pos)
+        self._press = {
+            "pos": pos,
+            "img": img,
+            "mode": self._current_mode(int(event.modifiers())),
+            "tablet": tablet,
+            "drag": False,
+            "path": [img],  # freehand lasso, image coordinates
+            "last": pos,  # last recorded lasso point
+            "cursor": pos,  # latest pointer position
+        }
+        # Qt's global button state only tracks real (spontaneous) mouse input,
+        # not tablet strokes, so the watchdog is for mouse strokes only.
+        if not tablet and event.spontaneous():
+            self._stroke_watchdog.start()
+
+    def _update_stroke(self, pos: QPointF) -> None:
+        press = self._press
+        press["cursor"] = pos
+        limit = DRAG_THRESHOLD_TABLET if press["tablet"] else DRAG_THRESHOLD
+        if not press["drag"] and (pos - press["pos"]).manhattanLength() >= limit:
+            press["drag"] = True
+        if press["drag"] and (pos - press["last"]).manhattanLength() >= LASSO_STEP:
+            press["path"].append(cv.to_image(self.view, pos))
+            press["last"] = pos
+            if self.overlay is not None:
+                self._sync_overlay()
+                self.overlay.set_lasso(press["path"])
+
+    def _end_stroke(self, pos: QPointF | None = None) -> None:
+        """Commit the stroke: a click, or a lasso if it moved past the threshold."""
+        press, self._press = self._press, None
+        self._stroke_watchdog.stop()
+        if self.overlay is not None:
+            self.overlay.set_lasso(None)
+        self._cursor_timer.start(0)
+        if press is None or self.view is None:
+            return
+        pos = press["cursor"] if pos is None else pos
+        if press["drag"]:
+            press["path"].append(cv.to_image(self.view, pos))
+            self._finish_lasso(press, pos)
+        else:
+            self._finish_click(press, pos)
+
+    def _cancel_stroke(self) -> None:
+        self._press = None
+        self._stroke_watchdog.stop()
+        if self.overlay is not None:
+            self.overlay.set_lasso(None)
+
+    def _check_stroke(self) -> None:
+        if self._press is not None and not self._press["tablet"] and not (QApplication.mouseButtons() & Qt.LeftButton):
+            self._end_stroke()
+
+    def _on_app_state(self, state) -> None:
+        if state != Qt.ApplicationActive and self._press is not None:
+            self._cancel_stroke()
 
     # ------------------------------------------------------------- prompts
 

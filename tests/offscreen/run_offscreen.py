@@ -18,7 +18,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(ROOT / "src"))
 
 from PyQt5.QtCore import QEvent, QPoint, QPointF, Qt  # noqa: E402
-from PyQt5.QtGui import QKeyEvent, QMouseEvent  # noqa: E402
+from PyQt5.QtGui import QKeyEvent, QMouseEvent, QTabletEvent  # noqa: E402
 from PyQt5.QtWidgets import QAction, QApplication, QToolButton  # noqa: E402
 
 import fake_krita  # noqa: E402
@@ -59,6 +59,14 @@ def mouse(widget, kind, pos, button=Qt.LeftButton, buttons=None, mods=Qt.NoModif
     return QApplication.sendEvent(widget, ev)
 
 
+def pen(kind, pos, button, buttons, pressure):
+    ev = QTabletEvent(kind, QPointF(pos), QPointF(pos), QTabletEvent.Stylus, QTabletEvent.Pen, pressure, 0, 0, 0.0, 0.0, 0, Qt.NoModifier, 1, button, buttons)
+    return QApplication.sendEvent(CANVAS[0], ev)
+
+
+CANVAS = []
+
+
 def widget_pos(view, x, y):
     return QPointF(view.offset[0] + x * view.zoom, view.offset[1] + y * view.zoom)
 
@@ -66,6 +74,7 @@ def widget_pos(view, x, y):
 def main() -> int:
     image = fake_krita.test_image()
     win, toolbox, canvas, tool_label = fake_krita.build_main_window(image)
+    CANVAS.append(canvas)
     doc = fake_krita.Document(image)
     view = fake_krita.View(doc)
     window = fake_krita.Window(win, view)
@@ -168,6 +177,72 @@ def main() -> int:
     mouse(canvas, QEvent.MouseMove, widget_pos(view, 350, 400), button=Qt.NoButton, buttons=Qt.NoButton)
     check(pump(5, until=lambda: tool.overlay.preview is not None), "hover shows a preview")
     win.grab().save(str(OUT / "offscreen_hover.png"))
+
+    print("stroke robustness (lost releases can't leave the lasso stuck)")
+    ring = [widget_pos(view, 350 + 190 * math.cos(a), 400 + 190 * math.sin(a)) for a in (i * 2 * math.pi / 30 for i in range(31))]
+
+    def lasso_moves(points, tablet=False, buttons=Qt.LeftButton, pressure=0.6):
+        for pt in points:
+            if tablet:
+                pen(QEvent.TabletMove, pt, Qt.NoButton, buttons, pressure)
+            else:
+                mouse(canvas, QEvent.MouseMove, pt, buttons=buttons)
+
+    n = len(doc.selections)
+    mouse(canvas, QEvent.MouseButtonPress, ring[0])
+    lasso_moves(ring[1:])
+    check(tool._press is not None and tool._press["drag"], "mouse lasso in progress")
+    mouse(canvas, QEvent.MouseMove, ring[-1], button=Qt.NoButton, buttons=Qt.NoButton)  # release was lost
+    check(tool._press is None and tool.overlay.lasso is None, "a move with the button up ends the stroke")
+    check(wait_selection(n + 1), "...and commits the lasso")
+    mouse(canvas, QEvent.MouseMove, widget_pos(view, 100, 100), button=Qt.NoButton, buttons=Qt.NoButton)
+    check(tool._press is None and tool.overlay.lasso is None, "later hover moves don't draw")
+
+    n = len(doc.selections)
+    pen(QEvent.TabletPress, ring[0], Qt.LeftButton, Qt.LeftButton, 0.6)
+    lasso_moves(ring[1:], tablet=True)
+    pen(QEvent.TabletRelease, ring[-1], Qt.NoButton, Qt.NoButton, 0.0)  # driver reports no button on pen-up
+    check(tool._press is None, "tablet release with button()=NoButton ends the stroke")
+    check(wait_selection(n + 1), "...and commits the lasso")
+
+    n = len(doc.selections)
+    pen(QEvent.TabletPress, ring[0], Qt.LeftButton, Qt.LeftButton, 0.6)
+    lasso_moves(ring[1:], tablet=True)
+    pen(QEvent.TabletMove, ring[-1], Qt.NoButton, Qt.NoButton, 0.0)  # lifted, release never came
+    check(tool._press is None, "tablet move with no pressure/buttons ends the stroke")
+    check(wait_selection(n + 1), "...and commits the lasso")
+
+    n = len(doc.selections)
+    pen(QEvent.TabletPress, ring[0], Qt.LeftButton, Qt.LeftButton, 0.6)
+    lasso_moves(ring[1:], tablet=True, buttons=Qt.NoButton, pressure=0.5)
+    check(tool._press is not None, "pressure keeps a stroke alive when a driver drops the button state")
+    QApplication.sendEvent(app, QTabletEvent(QEvent.TabletLeaveProximity, QPointF(), QPointF(), QTabletEvent.Stylus, QTabletEvent.Pen, 0.0, 0, 0, 0.0, 0.0, 0, Qt.NoModifier, 1, Qt.NoButton, Qt.NoButton))
+    check(tool._press is None, "pen leaving proximity ends the stroke")
+    check(wait_selection(n + 1), "...and commits the lasso")
+
+    n = len(doc.selections)
+    mouse(canvas, QEvent.MouseButtonPress, ring[0])
+    lasso_moves(ring[1:15])
+    app.applicationStateChanged.emit(Qt.ApplicationInactive)
+    check(tool._press is None and tool.overlay.lasso is None, "switching apps mid-stroke cancels it")
+    app.applicationStateChanged.emit(Qt.ApplicationActive)
+    pump(0.5)
+    check(len(doc.selections) == n, "...without selecting")
+
+    n = len(doc.selections)
+    mouse(canvas, QEvent.MouseButtonPress, ring[0])
+    lasso_moves(ring[1:15])
+    mouse(canvas, QEvent.MouseButtonPress, widget_pos(view, 350, 400))  # stale stroke, new press
+    check(tool._press is not None and not tool._press["drag"], "a new press replaces a stale stroke")
+    mouse(canvas, QEvent.MouseButtonRelease, widget_pos(view, 350, 400))
+    check(wait_selection(n + 1) and len(doc.selections) == n + 1, "...and the click selects once")
+
+    mouse(canvas, QEvent.MouseButtonPress, ring[0])
+    lasso_moves(ring[1:10])
+    mouse(canvas, QEvent.MouseButtonRelease, ring[9], button=Qt.RightButton, buttons=Qt.LeftButton)
+    check(tool._press is not None, "releasing another button mid-stroke keeps the lasso")
+    QApplication.sendEvent(canvas, QKeyEvent(QEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier))
+    check(tool._press is None and tool.overlay.lasso is None, "Escape cancels")
 
     print("mode action + cursor")
     win.findChild(QAction, "selection_tool_mode_add").trigger()
