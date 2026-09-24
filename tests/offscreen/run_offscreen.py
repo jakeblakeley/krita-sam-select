@@ -244,6 +244,54 @@ def main() -> int:
     QApplication.sendEvent(canvas, QKeyEvent(QEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier))
     check(tool._press is None and tool.overlay.lasso is None, "Escape cancels")
 
+    print("Krita's selection actions bar takes priority")
+    bar = fake_krita.add_actions_bar(canvas, 180, 150)
+    canvas.repaint()  # Krita repaints the canvas when the bar appears
+    pump(0.05)
+    expect = bar[0].geometry().united(bar[-1].geometry()).adjusted(-6, -6, 6, 6)
+    check(tool.overlay.exclude == expect, f"overlay knows where the bar is ({tool.overlay.exclude})")
+
+    def deliver(kind, pt, mods=Qt.NoModifier):
+        # Route like Qt: the widget under the pointer gets it (transparent overlays skipped).
+        target = canvas.childAt(pt.toPoint()) or canvas
+        local = QPointF(target.mapFrom(canvas, pt.toPoint()))
+        return target, mouse(target, kind, local, mods=mods)
+
+    clicked = []
+    bar[2].clicked.connect(lambda: clicked.append(True))
+    n = len(doc.selections)
+    on_button = QPointF(bar[2].geometry().center())
+    target, _ = deliver(QEvent.MouseButtonPress, on_button)
+    deliver(QEvent.MouseButtonRelease, on_button)
+    check(target is bar[2], f"clicks over a bar button reach the button, not the overlay ({type(target).__name__})")
+    check(clicked == [True], "the bar button fires")
+    in_margin = QPointF(bar[0].geometry().left() + 40, bar[0].geometry().top() - 3)  # painted outline, no widget
+    target, _ = deliver(QEvent.MouseButtonPress, in_margin)
+    check(target is canvas and tool._press is None, "a press on the bar's painted margin doesn't start a SAM stroke")
+    deliver(QEvent.MouseButtonRelease, in_margin)
+    pump(0.5)
+    check(len(doc.selections) == n, "...and selects nothing")
+
+    tool.overlay.set_preview(bytes([255]) * (100 * 100), 0, 0, 100, 100, 100 / max(doc.width(), doc.height()))
+    shot = tool.overlay.grab().toImage()
+    inside = expect.center()
+    outside = QPoint(expect.right() + 40, expect.bottom() + 40)
+    check(shot.pixelColor(inside).alpha() == 0, "hover preview is not painted over the bar")
+    check(shot.pixelColor(outside).alpha() > 0, "...but is painted everywhere else")
+    mouse(canvas, QEvent.MouseMove, in_margin, button=Qt.NoButton, buttons=Qt.NoButton)
+    check(tool.overlay.preview is None, "hovering the bar clears the preview")
+
+    for w in bar:  # move the bar onto the text box
+        w.move(w.x() - 180 + (canvas.width() - 8 * 30) // 2, canvas.height() - 40)
+    canvas.repaint()
+    pump(0.05)
+    check(not tool.prompt.geometry().intersects(tool.overlay.exclude), f"text box moves clear of the bar ({tool.prompt.geometry()} vs {tool.overlay.exclude})")
+    for w in bar:
+        w.hide()
+    canvas.repaint()
+    pump(0.05)
+    check(tool.overlay.exclude is None and tool.prompt.geometry().bottom() > canvas.height() - 40, "bar hidden: overlay and text box return to normal")
+
     print("mode action + cursor")
     win.findChild(QAction, "selection_tool_mode_add").trigger()
     check(settings.mode() == modes.ADD, "selection_tool_mode_add switches the (shared) mode")

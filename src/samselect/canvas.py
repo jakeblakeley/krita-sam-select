@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
-from PyQt5.QtCore import QPointF
+from PyQt5.QtCore import QPointF, QRect
 from PyQt5.QtGui import QTransform
 from PyQt5.QtWidgets import QAbstractScrollArea, QMdiArea, QWidget
 
 CANVAS_CLASSES = ("KisOpenGLCanvas2", "KisQPainterCanvas")
+# Krita's floating selection actions bar: real child widgets of the canvas for
+# input, but painted by the canvas itself (KisSelectionActionsPanel::draw).
+ACTIONS_BAR_CLASSES = ("KisSelectionActionsPanelButton", "KisSelectionActionsPanelHandle")
+# The panel paints a 4 px outline plus a 1 px contrast ring around its buttons.
+ACTIONS_BAR_MARGIN = 6
 
 
 def canvas_widget(qwindow) -> QWidget | None:
@@ -45,3 +50,19 @@ def widget_to_image(view) -> QTransform:
 
 def to_image(view, pos) -> QPointF:
     return widget_to_image(view).map(QPointF(pos))
+
+
+def actions_bar_rect(canvas) -> QRect | None:
+    """Where Krita's selection actions bar is drawn on the canvas, or None if hidden."""
+    rect = QRect()
+    for child in canvas.children():
+        if isinstance(child, QWidget) and child.isVisible() and child.metaObject().className() in ACTIONS_BAR_CLASSES:
+            rect = rect.united(child.geometry())
+    if rect.isNull():
+        return None
+    m = ACTIONS_BAR_MARGIN
+    return rect.adjusted(-m, -m, m, m)
+
+
+def is_actions_bar_widget(obj) -> bool:
+    return isinstance(obj, QWidget) and obj.metaObject().className() in ACTIONS_BAR_CLASSES

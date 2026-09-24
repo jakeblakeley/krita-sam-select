@@ -16,6 +16,7 @@ import types
 from PyQt5.QtCore import QObject, QRect, QSize, Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QIcon, QImage, QPainter, QTransform
 from PyQt5.QtWidgets import (
+    QAbstractButton,
     QAbstractScrollArea,
     QAction,
     QButtonGroup,
@@ -278,6 +279,34 @@ class KoToolBox(QWidget):
 
 class KisOpenGLCanvas2(QWidget):
     pass
+
+
+class KisSelectionActionsPanelButton(QAbstractButton):
+    """Like Krita's: an invisible hit area; the canvas paints the visuals."""
+
+    def paintEvent(self, event):
+        pass
+
+
+class KisSelectionActionsPanelHandle(QWidget):
+    pass
+
+
+def add_actions_bar(canvas, x, y, buttons=7, size=30):
+    """Krita's selection actions bar: buttons + drag handle, children of the canvas."""
+    widgets = []
+    for i in range(buttons):
+        b = KisSelectionActionsPanelButton(canvas)
+        b.setFixedSize(size, size)
+        b.move(x + i * size, y)
+        b.show()
+        widgets.append(b)
+    h = KisSelectionActionsPanelHandle(canvas)
+    h.setFixedSize(size, size)
+    h.move(x + buttons * size, y)
+    h.show()
+    widgets.append(h)
+    return widgets
 
 
 def build_main_window(image: QImage):

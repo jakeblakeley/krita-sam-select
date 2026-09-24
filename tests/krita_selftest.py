@@ -106,6 +106,19 @@ def steps():
     yield 1.5  # let Krita compute the marching-ants outline
     shot("after_click")
 
+    # 1b. Krita's selection actions bar (if enabled) stays on top and keeps its input
+    tool.canvas.repaint()
+    yield 0.2
+    bar_widgets = [w for w in tool.canvas.children() if cv.is_actions_bar_widget(w) and w.isVisible()]
+    report["actions_bar"] = {"widgets": len(bar_widgets), "exclude": str(tool.overlay.exclude)}
+    if bar_widgets:
+        check("overlay excludes the actions bar", tool.overlay.exclude is not None and tool.overlay.exclude.contains(bar_widgets[0].geometry()))
+        hit = tool.canvas.childAt(bar_widgets[0].geometry().center())
+        check("actions bar button is what the pointer hits", hit is bar_widgets[0], type(hit).__name__)
+        check("text box clear of the actions bar", not tool.prompt.geometry().intersects(tool.overlay.exclude))
+    else:
+        report["notes"].append("selection actions bar not shown (disabled in Krita's settings?)")
+
     # 2. undo / redo
     app.action("edit_undo").trigger()
     yield 0.8

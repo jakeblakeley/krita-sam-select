@@ -290,6 +290,8 @@ class SamSelectTool(QObject):
                 self._end_stroke()
             return False
         if obj is not self.canvas:
+            if t == QEvent.Enter and cv.is_actions_bar_widget(obj):
+                self._clear_hover()  # pointer moved onto Krita's selection actions bar
             return False
         if t in POINTER:
             try:
@@ -328,6 +330,18 @@ class SamSelectTool(QObject):
         if tf != self.overlay.image_to_widget:
             self.overlay.image_to_widget = tf
             self.overlay.update()
+        # Krita's selection actions bar is painted by the canvas, so it would
+        # sit under our overlay: paint around it and keep the text box clear.
+        bar = cv.actions_bar_rect(self.canvas)
+        if bar != self.overlay.exclude:
+            self.overlay.exclude = bar
+            self.overlay.update()
+        if self.prompt is not None:
+            self.prompt.avoid(bar)
+
+    def _on_actions_bar(self, pos: QPointF) -> bool:
+        bar = cv.actions_bar_rect(self.canvas)
+        return bar is not None and bar.contains(pos.toPoint())
 
     @staticmethod
     def _left_held(event, tablet: bool) -> bool:
@@ -342,6 +356,11 @@ class SamSelectTool(QObject):
         if t in PRESS:
             if event.button() != Qt.LeftButton or self._space:
                 return False
+            if self._on_actions_bar(pos):
+                # Krita's selection actions bar has priority: its buttons get
+                # their own events; its painted margin and gaps are dead space.
+                event.accept()
+                return True
             self._begin_stroke(event, pos, tablet)
             event.accept()
             return True
@@ -572,6 +591,9 @@ class SamSelectTool(QObject):
 
     def _hover_at(self, pos: QPointF) -> None:
         if not settings.get("hoverPreview") or self.backend.state != bk.READY or self._capture is None:
+            return
+        if self._on_actions_bar(pos):
+            self._clear_hover()
             return
         doc, w, h = self._doc_size()
         if doc is None:

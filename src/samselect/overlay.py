@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import math
 
-from PyQt5.QtCore import QEvent, QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor, QImage, QPainter, QPen, QPolygonF, QTransform
+from PyQt5.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt, QTimer, pyqtSignal
+from PyQt5.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPolygonF, QTransform
 from PyQt5.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit, QToolButton, QWidget
 
 PLACEHOLDER = "type what to select"
@@ -32,6 +32,9 @@ class CanvasOverlay(QWidget):
         self.lasso: QPolygonF | None = None  # freehand path, image coordinates
         self.busy = False
         self.busy_pos = QPointF()
+        # Areas drawn by Krita on the canvas that must stay on top of us
+        # (the selection actions bar): we paint around them.
+        self.exclude: QRect | None = None
         self._spin = 0
         self._spinner = QTimer(self)
         self._spinner.setInterval(40)
@@ -103,6 +106,12 @@ class CanvasOverlay(QWidget):
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        if self.exclude is not None:
+            visible = QPainterPath()
+            visible.addRect(QRectF(self.rect()))
+            hole = QPainterPath()
+            hole.addRoundedRect(QRectF(self.exclude), 6, 6)
+            p.setClipPath(visible.subtracted(hole))
         if self.preview is not None:
             p.save()
             p.setRenderHint(QPainter.SmoothPixmapTransform)
@@ -169,6 +178,7 @@ class PromptBar(QFrame):
     def __init__(self, canvas: QWidget) -> None:
         super().__init__(canvas)
         self.setObjectName("SamSelectPromptBar")
+        self._avoid: QRect | None = None
         self.setAttribute(Qt.WA_NoMousePropagation)
         self.setAutoFillBackground(False)
         layout = QHBoxLayout(self)
@@ -250,13 +260,25 @@ class PromptBar(QFrame):
     def sizeHint(self) -> QSize:
         return QSize(380, 32)
 
+    def avoid(self, rect: QRect | None) -> None:
+        """Keep clear of Krita's selection actions bar (it takes priority)."""
+        if rect != self._avoid:
+            self._avoid = rect
+            self.reposition()
+
     def reposition(self) -> None:
         parent = self.parentWidget()
         if parent is None:
             return
         w = min(max(300, int(parent.width() * 0.38)), 520, parent.width() - 2 * self.MARGIN)
         h = self.sizeHint().height()
-        self.setGeometry((parent.width() - w) // 2, parent.height() - h - self.MARGIN, w, h)
+        geo = QRect((parent.width() - w) // 2, parent.height() - h - self.MARGIN, w, h)
+        bar = self._avoid
+        if bar is not None and geo.intersects(bar):
+            above = bar.top() - h - self.MARGIN // 2
+            below = bar.bottom() + self.MARGIN // 2
+            geo.moveTop(above if above >= self.MARGIN or below + h > parent.height() else below)
+        self.setGeometry(geo)
 
     def eventFilter(self, obj, event) -> bool:
         if event.type() == QEvent.Resize:
