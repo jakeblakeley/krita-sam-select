@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ActionCollection version="2" name="Scripts">
+    <Actions category="Scripts">
+        <text>SAM Select</text>
+
+        <Action name="samselect_tool">
+            <icon></icon>
+            <text>SAM Select Tool</text>
+            <whatsThis></whatsThis>
+            <toolTip>Select objects with Segment Anything 3</toolTip>
+            <iconText>SAM Select</iconText>
+            <activationFlags>1</activationFlags>
+            <activationConditions>0</activationConditions>
+            <shortcut>W</shortcut>
+            <isCheckable>false</isCheckable>
+            <statusTip></statusTip>
+        </Action>
+        <Action name="samselect_install">
+            <icon></icon>
+            <text>SAM Select: Install or Repair Backend…</text>
+            <whatsThis></whatsThis>
+            <toolTip>Install (or reinstall) the SAM 3 backend</toolTip>
+            <iconText></iconText>
+            <activationFlags>0</activationFlags>
+            <activationConditions>0</activationConditions>
+            <shortcut></shortcut>
+            <isCheckable>false</isCheckable>
+            <statusTip></statusTip>
+        </Action>
+    </Actions>
+</ActionCollection>

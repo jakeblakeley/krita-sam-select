@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=Krita/PythonPlugin
+X-KDE-Library=samselect
+X-Python-2-Compatible=false
+X-Krita-Manual=Manual.html
+Name=SAM Select
+Comment=Select objects with Segment Anything 3: click, drag a box, or type what to select (Apple Silicon)

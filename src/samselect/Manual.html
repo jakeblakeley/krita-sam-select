@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>SAM Select</title></head>
+<body>
+<h3>SAM Select</h3>
+<p>Object selection powered by Meta's Segment Anything 3, running locally on Apple Silicon with MLX.</p>
+
+<h4>Using the tool</h4>
+<p>Pick <b>SAM Select</b> in the toolbox (next to the selection tools) or press <b>W</b>.</p>
+<ul>
+  <li><b>Click</b> an object to select it. With “Highlight object under cursor” on, the object is previewed before you click.</li>
+  <li><b>Drag</b> a box to select every object inside it (or just the main object; see Tool Options).</li>
+  <li><b>Type</b> what to select in the box at the bottom of the canvas (“type what to select”), for example <i>cat</i>, <i>red car</i> or <i>windows</i>, and press Return. Every match is selected.</li>
+</ul>
+
+<h4>Combining selections</h4>
+<p>Modifiers work exactly like Krita's selection tools, and hold for clicks, drags and Return in the text box:</p>
+<ul>
+  <li><b>⇧ Shift</b>: add</li>
+  <li><b>⌥ Option</b>: subtract</li>
+  <li><b>⇧⌥</b>: intersect</li>
+  <li><b>⌘ Command</b>: replace</li>
+  <li><b>⌘⌥</b>: symmetric difference</li>
+</ul>
+<p>With <i>Switch Control/Alt Selection Modifiers</i> enabled in Krita's preferences, ⌘ and ⌥ swap roles, as they do for the built-in tools.
+The default mode is shared with Krita's other selection tools, and Space+drag, pinch and scroll keep navigating the canvas.</p>
+
+<h4>First run</h4>
+<p>Choose <b>Install SAM 3…</b> in Tool Options. It installs a private Python environment (~350 MB) in
+<code>~/Library/Application Support/SamSelect</code>, then downloads the 1.7 GB model once. Everything runs offline after that.</p>
+</body>
+</html>

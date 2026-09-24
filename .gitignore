@@ -1,0 +1,8 @@
+# Build output: versioned plugin zips (attach these to GitHub Releases)
+dist/
+
+__pycache__/
+*.py[co]
+.DS_Store
+.venv/
+*.zip.tmp
