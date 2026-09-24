@@ -2,7 +2,7 @@
 
 **Object selection for Krita powered by Meta's [Segment Anything 3](https://ai.meta.com/sam3/), running locally on Apple Silicon.**
 
-![SAM Select in Krita: typing "cat" selects the kitten, then clicks and a rough lasso add to the selection](docs/demo.gif)
+![SAM Select demo in Krita: selecting a kitten and a puppy in a photo](docs/demo.gif)
 
 <sub>▶ [Full-quality video (.mov)](https://github.com/jakeblakeley/krita-sam-select/releases/download/v0.3.2/krita-sam-select.mov)</sub>
 
