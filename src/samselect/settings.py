@@ -28,7 +28,7 @@ DEFAULTS = {
     "growSelection": 0,  # px, negative shrinks
     "featherSelection": 0,  # px
     "sampleLayersMode": SAMPLE_ALL,
-    "lassoSelectsAllObjects": True,  # lasso = every object inside it; False = its main object
+    "lassoSelectsAllObjects": True,  # lasso = the objects best matching it; False = the single best match
     "textThreshold": 0.5,
     "hoverPreview": True,
     "idleUnloadMinutes": 20,

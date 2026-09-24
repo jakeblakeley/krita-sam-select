@@ -7,7 +7,7 @@ SAM Select adds a tool to Krita's toolbox, next to the built-in selection tools.
 | | Gesture | What gets selected |
 |---|---|---|
 | 🖱️ | **Click** an object | That object. With hover preview on, it's highlighted before you click. |
-| ➰ | **Draw a freehand lasso** around objects | Every object inside the lasso, or only its main object (set in Tool Options). |
+| ➰ | **Roughly lasso** objects | The object(s) that best match what you drew. They don't need to be fully enclosed. Tool Options can limit this to the single best match. |
 | ⌨️ | **Type** in the on-canvas box ("*type what to select*") and press Return | Every instance of what you describe, such as *cat*, *red car* or *windows*. |
 
 Results are ordinary Krita selections. They show marching ants, go on the undo stack, and work with every selection feature Krita has.
@@ -54,7 +54,7 @@ These numbers were measured on an M5 Pro with the bf16 weights, using an 1800×1
 | Click → selection visible in Krita | ~0.15 s, of which inference is ~10 ms |
 | Hover preview | ~10 ms of inference per position |
 | Text prompt → selection in Krita | ~0.4 s |
-| Lasso → selection (all objects inside, or main object) | ~0.15 to 0.5 s |
+| Lasso → selection | ~0.05 to 0.3 s |
 | Mask upscaled to an 8000×6000 canvas | ~40 ms |
 
 The tool starts encoding the image as soon as you activate it, so the first click is usually instant.
@@ -79,7 +79,7 @@ flowchart LR
 - **Separate process.** MLX and the model run in their own Python, managed with [uv](https://docs.astral.sh/uv/). Krita's UI never blocks, and a backend crash can't take Krita down. The process exits with Krita, and after 20 idle minutes, to free memory.
 - **MLX on the GPU.** It uses [mlx-vlm](https://github.com/Blaizzy/mlx-vlm)'s SAM 3 port with the [`mlx-community/sam3-bf16`](https://huggingface.co/mlx-community/sam3-bf16) weights. The click and lasso path is re-implemented in [`engine.py`](src/samselect/server/engine.py) to match the reference SAM 2/3 tracker decoder. That means pixel-centred prompt normalisation, padding tokens, the no-memory embedding, the high-resolution skip order, and a sigmoid on the IoU head. It also keeps the ViT in bf16 (upstream silently promotes it to fp32).
 - **One encode per image.** The ViT backbone runs once per image state. Clicks, lassos and hover only run the lightweight decoder. Text prompts reuse the same backbone features.
-- **Lasso = objects inside it.** The lasso isn't used as a mask. A grid of point prompts inside it (plus a box prompt on its bounds) finds candidate objects. Only good-quality candidates that sit mostly inside the lasso are kept, so a loose lasso around a person selects the person, not the background you circled.
+- **The lasso is a hint, not a boundary.** Point prompts on a grid inside the lasso (each at three granularities: part, larger part, whole object) plus a box prompt on its bounds propose candidate objects. Weak candidates and ones mostly outside the lasso are dropped. The rest are scored by IoU with the drawn area, and objects are added while they improve the match. So a loop that clips a truck's wheels still gets the whole truck, and a loose loop around a person selects the person, not the background you circled. On deliberately sloppy lassos this scores 0.98–0.99 IoU against ground truth, where requiring full enclosure scored 0.
 - **Small transfers.** Krita shrinks the canvas to the model's 1008² input in C++ before sending it. The backend upsamples mask logits straight to canvas resolution on the GPU, anti-aliases edges with a signed-distance estimate, and sends back only the mask's bounding box.
 
 ## Development

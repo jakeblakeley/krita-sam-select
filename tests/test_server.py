@@ -58,6 +58,7 @@ def _circle(cx, cy, r, w, h, n=48):
 
 
 LASSO = _circle(250, 300, 175, 900, 600)  # loosely around the red disc only
+SLOPPY = _circle(300, 320, 95, 900, 600)  # cuts through the red disc, spills onto the background
 
 
 def main() -> int:
@@ -128,7 +129,15 @@ def main() -> int:
             )
             x, y, w, h = reply["x"], reply["y"], reply["w"], reply["h"]
             assert abs(x - 130) < 14 and abs(y - 180) < 14 and abs(w - 240) < 24 and abs(h - 240) < 24, (objects, x, y, w, h)
-        print("lasso geometry OK")
+        # The lasso is a hint, not a boundary: one that cuts through the disc
+        # still selects the whole disc.
+        for objects in (True, False):
+            reply, data = client.call(
+                {"cmd": "segment", "key": key, "prompt": {"type": "lasso", "points": SLOPPY, "objects": objects}, "out": {"w": W, "h": H}}
+            )
+            x, y, w, h = reply["x"], reply["y"], reply["w"], reply["h"]
+            assert abs(x - 130) < 14 and abs(y - 180) < 14 and abs(w - 240) < 24 and abs(h - 240) < 24, ("sloppy", objects, x, y, w, h)
+        print("lasso geometry OK (loose and sloppy)")
 
     assert client.close() == 0
     print("server exited cleanly")

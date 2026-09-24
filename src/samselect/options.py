@@ -101,9 +101,13 @@ class ToolOptionsWidget(QWidget):
 
         # SAM-specific.
         self.lasso_mode = QComboBox(self)
-        self.lasso_mode.addItem("All objects inside", True)
-        self.lasso_mode.addItem("Main object inside", False)
-        self.lasso_mode.setToolTip("What a freehand lasso selects: every object inside it, or just its dominant object.")
+        self.lasso_mode.addItem("Everything it covers", True)
+        self.lasso_mode.addItem("Best single match", False)
+        self.lasso_mode.setToolTip(
+            "The lasso is a rough hint, not a boundary: it doesn't need to enclose anything.\n"
+            "Everything it covers: the objects that together best match the area you drew.\n"
+            "Best single match: only the one object that best matches it."
+        )
         form.addRow("Lasso selects:", self.lasso_mode)
 
         self.threshold = QComboBox(self)
@@ -178,7 +182,7 @@ class ToolOptionsWidget(QWidget):
         self.hover.setChecked(settings.get("hoverPreview"))
         swap = settings.swap_ctrl_alt()
         self.hint.setText(
-            "Click an object to select it · draw a lasso around objects to select them · "
+            "Click an object to select it · roughly lasso objects to select them (no need to enclose them) · "
             "type in the box on the canvas to select by description.\n" + modes.modifier_hint(swap)
         )
 
