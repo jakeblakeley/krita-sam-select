@@ -7,8 +7,8 @@ Krita does not let Python register tools, so SAM Select behaves like one:
   checks our toolbox button, which unchecks Krita's.
 * While active, an application-level event filter sees canvas input before
   Krita's input manager (which re-installs its own canvas filter on every
-  focus change). Left-button press/drag/release and tablet strokes become
-  SAM prompts; everything else - wheel, pinch, middle/right buttons,
+  focus change). Left-button clicks, freehand lasso drags and tablet
+  strokes become SAM prompts; everything else - wheel, pinch, middle/right buttons,
   Space+drag panning, shortcuts - passes straight through to Krita.
 * Our cursor, overlay and text box live on the canvas widget; options live
   in the Tool Options docker.
@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 from krita import Krita
-from PyQt5.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QTimer
+from PyQt5.QtCore import QEvent, QObject, QPointF, Qt, QTimer
 from PyQt5.QtGui import QColor, QIcon
 from PyQt5.QtWidgets import QAbstractSpinBox, QAction, QApplication, QLineEdit, QTextEdit
 
@@ -36,6 +36,8 @@ TOOL_NAME = "SAM Select"
 ICON_DIR = Path(__file__).resolve().parent / "icons"
 DRAG_THRESHOLD = 4  # logical px (mouse)
 DRAG_THRESHOLD_TABLET = 7
+LASSO_STEP = 2.0  # logical px between recorded lasso points
+LASSO_MAX_POINTS = 256  # sent to the backend
 HOVER_DELAY_MS = 30
 PREVIEW_MAX_SIDE = 1024
 
@@ -96,7 +98,7 @@ class SamSelectTool(QObject):
         self.options_host = ToolOptionsHost(self.qwindow)
 
         shortcut = self._shortcut_text()
-        tip = f"{TOOL_NAME}{f' ({shortcut})' if shortcut else ''}\nSelect objects with SAM 3: click, drag a box, or type a description."
+        tip = f"{TOOL_NAME}{f' ({shortcut})' if shortcut else ''}\nSelect objects with SAM 3: click, lasso around objects, or type a description."
         self.toolbox = ToolboxButton(self.qwindow, tool_icon(), tip)
         self.toolbox.toggled.connect(self._on_toggled)
 
@@ -302,7 +304,7 @@ class SamSelectTool(QObject):
         elif key == Qt.Key_Escape and t == QEvent.KeyPress and self._press is not None:
             self._press = None
             if self.overlay is not None:
-                self.overlay.set_drag(None)
+                self.overlay.set_lasso(None)
             return True
         return False
 
@@ -320,12 +322,15 @@ class SamSelectTool(QObject):
                 return False
             self._clear_hover()
             self.canvas.setFocus(Qt.MouseFocusReason)
+            img = cv.to_image(self.view, pos)
             self._press = {
                 "pos": pos,
-                "img": cv.to_image(self.view, pos),
+                "img": img,
                 "mode": self._current_mode(int(event.modifiers())),
                 "tablet": tablet,
                 "drag": False,
+                "path": [img],  # freehand lasso, image coordinates
+                "last": pos,
             }
             event.accept()
             return True
@@ -338,18 +343,21 @@ class SamSelectTool(QObject):
             limit = DRAG_THRESHOLD_TABLET if press["tablet"] else DRAG_THRESHOLD
             if not press["drag"] and (pos - press["pos"]).manhattanLength() >= limit:
                 press["drag"] = True
-            if press["drag"]:
+            if press["drag"] and (pos - press["last"]).manhattanLength() >= LASSO_STEP:
+                press["path"].append(cv.to_image(self.view, pos))
+                press["last"] = pos
                 self._sync_overlay()
-                self.overlay.set_drag(QRectF(press["img"], cv.to_image(self.view, pos)).normalized())
+                self.overlay.set_lasso(press["path"])
             event.accept()
             return True
         if t in RELEASE:
             if self._press is None or event.button() != Qt.LeftButton:
                 return False
             press, self._press = self._press, None
-            self.overlay.set_drag(None)
+            self.overlay.set_lasso(None)
             if press["drag"]:
-                self._finish_box(press, cv.to_image(self.view, pos), pos)
+                press["path"].append(cv.to_image(self.view, pos))
+                self._finish_lasso(press, pos)
             else:
                 self._finish_click(press, pos)
             event.accept()
@@ -372,16 +380,21 @@ class SamSelectTool(QObject):
             return
         self._run({"type": "point", "points": [[u, v, 1]]}, press["mode"], pos, "click")
 
-    def _finish_box(self, press, end, pos) -> None:
+    def _finish_lasso(self, press, pos) -> None:
         doc, w, h = self._doc_size()
         if doc is None:
             return
-        r = QRectF(press["img"], end).normalized().intersected(QRectF(0, 0, w, h))
-        if r.width() < 2 or r.height() < 2:
+        path = press["path"]
+        # Shoelace area in image pixels; a scribble that encloses almost
+        # nothing is treated as a click where it started.
+        area = 0.5 * abs(sum(a.x() * b.y() - b.x() * a.y() for a, b in zip(path, path[1:] + path[:1])))
+        if len(path) < 3 or area < 64:
+            self._finish_click(press, press["pos"])
             return
-        box = [r.left() / w, r.top() / h, r.right() / w, r.bottom() / h]
-        prompt = {"type": "box", "box": box, "objects": bool(settings.get("dragSelectsAllObjects"))}
-        self._run(prompt, press["mode"], pos, "box")
+        step = max(1, -(-len(path) // LASSO_MAX_POINTS))
+        points = [[min(max(p.x() / w, 0.0), 1.0), min(max(p.y() / h, 0.0), 1.0)] for p in path[::step]]
+        prompt = {"type": "lasso", "points": points, "objects": bool(settings.get("lassoSelectsAllObjects"))}
+        self._run(prompt, press["mode"], pos, "lasso")
 
     def _on_text(self, text: str, mods: int) -> None:
         if not self.active:
@@ -459,8 +472,8 @@ class SamSelectTool(QObject):
         if header.get("empty") or not same_size:
             if kind == "text":
                 self._message(f"Nothing matching “{prompt['text']}” found.")
-            elif kind == "box":
-                self._message("No objects found inside the box.")
+            elif kind == "lasso":
+                self._message("No objects found inside the lasso.")
             return
         changed = selection_ops.apply_mask(
             doc,

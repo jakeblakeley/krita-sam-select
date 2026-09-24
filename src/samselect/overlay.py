@@ -18,7 +18,7 @@ PLACEHOLDER = "type what to select"
 
 
 class CanvasOverlay(QWidget):
-    """Transparent layer for hover previews, the drag box and a busy spinner."""
+    """Transparent layer for hover previews, the lasso path and a busy spinner."""
 
     def __init__(self, canvas: QWidget) -> None:
         super().__init__(canvas)
@@ -29,7 +29,7 @@ class CanvasOverlay(QWidget):
         self.image_to_widget = QTransform()
         self.preview: QImage | None = None  # colourised mask, in "preview space"
         self.preview_to_image = QTransform()  # preview pixels -> image pixels
-        self.drag_polygon: QPolygonF | None = None  # image coordinates
+        self.lasso: QPolygonF | None = None  # freehand path, image coordinates
         self.busy = False
         self.busy_pos = QPointF()
         self._spin = 0
@@ -77,8 +77,8 @@ class CanvasOverlay(QWidget):
         self.preview_to_image = QTransform().translate(x / scale, y / scale).scale(1.0 / scale, 1.0 / scale)
         self.update()
 
-    def set_drag(self, rect_image: QRectF | None) -> None:
-        self.drag_polygon = QPolygonF(rect_image) if rect_image is not None else None
+    def set_lasso(self, points) -> None:
+        self.lasso = QPolygonF(points) if points else None
         self.update()
 
     def set_busy(self, busy: bool, pos: QPointF | None = None) -> None:
@@ -99,7 +99,7 @@ class CanvasOverlay(QWidget):
     # ------------------------------------------------------------ painting
 
     def paintEvent(self, _event) -> None:
-        if self.preview is None and self.drag_polygon is None and not self.busy:
+        if self.preview is None and self.lasso is None and not self.busy:
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
@@ -109,16 +109,17 @@ class CanvasOverlay(QWidget):
             p.setTransform(self.preview_to_image * self.image_to_widget)
             p.drawImage(0, 0, self.preview)
             p.restore()
-        if self.drag_polygon is not None:
-            poly = self.image_to_widget.map(self.drag_polygon)
-            # Krita-style outline: dark underlay + light dashes stays visible on any artwork.
+        if self.lasso is not None:
+            # Like Krita's Freehand Selection tool: the open path as drawn.
+            # Dark underlay + light dashes stays visible on any artwork.
+            path = self.image_to_widget.map(self.lasso)
             p.setBrush(Qt.NoBrush)
             p.setPen(QPen(QColor(0, 0, 0, 160), 1.0))
-            p.drawPolygon(poly)
+            p.drawPolyline(path)
             dash = QPen(QColor(255, 255, 255, 230), 1.0, Qt.CustomDashLine)
             dash.setDashPattern([4, 4])
             p.setPen(dash)
-            p.drawPolygon(poly)
+            p.drawPolyline(path)
         if self.busy:
             c = self.busy_pos + QPointF(21, 21)
             for i in range(8):
@@ -181,7 +182,7 @@ class PromptBar(QFrame):
         self.edit.setMinimumWidth(240)
         self.edit.setToolTip(
             "Describe what to select (e.g. “cat”, “red car”, “all windows”) and press Return.\n"
-            "Shift+Return adds, Alt+Return subtracts, Shift+Alt+Return intersects."
+            "⇧↩ adds, ⌥↩ subtracts, ⇧⌥↩ intersects."
         )
         self.go = QToolButton(self)
         self.go.setText("↵")

@@ -28,7 +28,7 @@ DEFAULTS = {
     "growSelection": 0,  # px, negative shrinks
     "featherSelection": 0,  # px
     "sampleLayersMode": SAMPLE_ALL,
-    "dragSelectsAllObjects": True,  # drag = every object in the box; False = the box's main object
+    "lassoSelectsAllObjects": True,  # lasso = every object inside it; False = its main object
     "textThreshold": 0.5,
     "hoverPreview": True,
     "idleUnloadMinutes": 20,

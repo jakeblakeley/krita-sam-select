@@ -31,6 +31,7 @@ MARKER = APP_DIR / "installed.txt"
 LOG_DIR = Path.home() / "Library" / "Logs" / "SamSelect"
 PYTHON_VERSION = "3.12"
 UV_URL = "https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-apple-darwin.tar.gz"
+SAM_LICENSE_URL = "https://github.com/facebookresearch/sam3/blob/main/LICENSE"
 UV_CANDIDATES = [
     APP_DIR / "bin" / "uv",
     Path("/opt/homebrew/bin/uv"),

@@ -100,11 +100,11 @@ class ToolOptionsWidget(QWidget):
         form.addRow("Feather:", self.feather)
 
         # SAM-specific.
-        self.drag_mode = QComboBox(self)
-        self.drag_mode.addItem("All objects in the box", True)
-        self.drag_mode.addItem("Main object in the box", False)
-        self.drag_mode.setToolTip("What a drag selects: every object inside the rectangle, or just its dominant object.")
-        form.addRow("Drag selects:", self.drag_mode)
+        self.lasso_mode = QComboBox(self)
+        self.lasso_mode.addItem("All objects inside", True)
+        self.lasso_mode.addItem("Main object inside", False)
+        self.lasso_mode.setToolTip("What a freehand lasso selects: every object inside it, or just its dominant object.")
+        form.addRow("Lasso selects:", self.lasso_mode)
 
         self.threshold = QComboBox(self)
         for label, value in (("Strict", 0.7), ("Normal", 0.5), ("Loose", 0.35), ("Very loose", 0.2)):
@@ -124,6 +124,15 @@ class ToolOptionsWidget(QWidget):
         status_row.addWidget(self.status_dot, 0, Qt.AlignTop)
         status_row.addWidget(self.status, 1)
         outer.addLayout(status_row)
+        self.license = QLabel(
+            f'The model is Meta\'s SAM 3, licensed under the <a href="{bk.SAM_LICENSE_URL}">SAM License</a>. '
+            "Installing it means you accept that license.",
+            self,
+        )
+        self.license.setWordWrap(True)
+        self.license.setOpenExternalLinks(True)
+        self.license.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        outer.addWidget(self.license)
         self.progress = QProgressBar(self)
         self.progress.setTextVisible(False)
         self.progress.setMaximumHeight(6)
@@ -147,7 +156,7 @@ class ToolOptionsWidget(QWidget):
         self.antialias.toggled.connect(lambda v: settings.put("antiAliasSelection", v))
         self.grow.valueChanged.connect(lambda v: settings.put("growSelection", v))
         self.feather.valueChanged.connect(lambda v: settings.put("featherSelection", v))
-        self.drag_mode.currentIndexChanged.connect(lambda _: settings.put("dragSelectsAllObjects", self.drag_mode.currentData()))
+        self.lasso_mode.currentIndexChanged.connect(lambda _: settings.put("lassoSelectsAllObjects", self.lasso_mode.currentData()))
         self.threshold.currentIndexChanged.connect(lambda _: settings.put("textThreshold", self.threshold.currentData()))
         self.hover.toggled.connect(lambda v: settings.put("hoverPreview", v))
         self.action_button.clicked.connect(self._on_action)
@@ -162,20 +171,20 @@ class ToolOptionsWidget(QWidget):
         self.antialias.setChecked(settings.get("antiAliasSelection"))
         self.grow.setValue(settings.get("growSelection"))
         self.feather.setValue(settings.get("featherSelection"))
-        self.drag_mode.setCurrentIndex(0 if settings.get("dragSelectsAllObjects") else 1)
+        self.lasso_mode.setCurrentIndex(0 if settings.get("lassoSelectsAllObjects") else 1)
         threshold = settings.get("textThreshold")
         idx = min(range(self.threshold.count()), key=lambda i: abs(self.threshold.itemData(i) - threshold))
         self.threshold.setCurrentIndex(idx)
         self.hover.setChecked(settings.get("hoverPreview"))
         swap = settings.swap_ctrl_alt()
         self.hint.setText(
-            "Click an object to select it · drag a box to select the objects inside · "
+            "Click an object to select it · draw a lasso around objects to select them · "
             "type in the box on the canvas to select by description.\n" + modes.modifier_hint(swap)
         )
 
     def reload(self) -> None:
         """Re-read settings (e.g. another selection tool changed the shared mode)."""
-        widgets = [self.reference, self.antialias, self.grow, self.feather, self.drag_mode, self.threshold, self.hover]
+        widgets = [self.reference, self.antialias, self.grow, self.feather, self.lasso_mode, self.threshold, self.hover]
         for w in widgets:
             w.blockSignals(True)
         try:
@@ -201,6 +210,7 @@ class ToolOptionsWidget(QWidget):
             bk.STOPPED: "SAM 3 is not running. It starts automatically when you use the tool.",
         }.get(state, "")
         self.status.setText(message or default)
+        self.license.setVisible(state == bk.MISSING or state == bk.INSTALLING)
         busy = state in bk.BUSY_STATES
         self.progress.setVisible(busy)
         if busy:

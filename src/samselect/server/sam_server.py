@@ -139,6 +139,12 @@ def _segment(engine, eng, header: dict):
     kind = prompt["type"]
     if kind == "point":
         result = engine.predict_point(state, [tuple(p) for p in prompt["points"]])
+    elif kind == "lasso":
+        polygon = [tuple(p) for p in prompt["points"]]
+        if prompt.get("objects", True):
+            result = engine.predict_objects_in_region(state, polygon)
+        else:
+            result = engine.predict_main_in_region(state, polygon)
     elif kind == "box":
         box = tuple(prompt["box"])
         if prompt.get("objects", True):

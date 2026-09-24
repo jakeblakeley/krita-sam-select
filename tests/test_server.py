@@ -51,6 +51,15 @@ class Client:
         return self.proc.wait(timeout=10)
 
 
+def _circle(cx, cy, r, w, h, n=48):
+    import math
+
+    return [[(cx + r * math.cos(2 * math.pi * i / n)) / w, (cy + r * math.sin(2 * math.pi * i / n)) / h] for i in range(n)]
+
+
+LASSO = _circle(250, 300, 175, 900, 600)  # loosely around the red disc only
+
+
 def main() -> int:
     image_path = Path(sys.argv[1]) if len(sys.argv) > 1 else None
     if image_path is None:
@@ -88,6 +97,8 @@ def main() -> int:
         "click": {"type": "point", "points": [[250 / 900, 300 / 600, 1]]},
         "box (single)": {"type": "box", "box": [0.1, 0.2, 0.5, 0.8], "objects": False},
         "box (objects)": {"type": "box", "box": [0.05, 0.05, 0.95, 0.95]},
+        "lasso (objects)": {"type": "lasso", "points": LASSO},
+        "lasso (main)": {"type": "lasso", "points": LASSO, "objects": False},
         "text": {"type": "text", "text": "circle"},
     }
     for name, prompt in prompts.items():
@@ -110,6 +121,14 @@ def main() -> int:
         mask = np.frombuffer(data, np.uint8).reshape(h, w)
         assert mask[h // 2, w // 2] == 255 and mask[0, 0] == 0
         print("click geometry OK")
+        # A loose lasso around the red disc selects it and nothing else.
+        for objects in (True, False):
+            reply, data = client.call(
+                {"cmd": "segment", "key": key, "prompt": {"type": "lasso", "points": LASSO, "objects": objects}, "out": {"w": W, "h": H}}
+            )
+            x, y, w, h = reply["x"], reply["y"], reply["w"], reply["h"]
+            assert abs(x - 130) < 14 and abs(y - 180) < 14 and abs(w - 240) < 24 and abs(h - 240) < 24, (objects, x, y, w, h)
+        print("lasso geometry OK")
 
     assert client.close() == 0
     print("server exited cleanly")

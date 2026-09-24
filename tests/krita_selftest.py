@@ -12,6 +12,7 @@ Executed by extension._run_selftest with ``tool`` and ``Krita`` in scope.
 """
 
 import json
+import math
 import os
 import time
 import traceback
@@ -137,7 +138,31 @@ def steps():
     shot("after_subtract")
     report["after_subtract"] = sel_rect(doc)
 
-    # 5. hover preview
+    # 5. freehand lasso around the whole truck (replace)
+    tf = cv.image_to_widget(tool.view)
+    ring = [(W * (0.5 + 0.49 * math.cos(a)), H * (0.47 + 0.27 * math.sin(a))) for a in (i * 2 * math.pi / 60 for i in range(61))]
+    pts = [tf.map(QPointF(x, y)) for x, y in ring]
+
+    def mouse(kind, p, buttons):
+        g = QPointF(tool.canvas.mapToGlobal(QPoint(int(p.x()), int(p.y()))))
+        QApplication.sendEvent(tool.canvas, QMouseEvent(kind, p, g, Qt.LeftButton, buttons, Qt.NoModifier))
+
+    mouse(QEvent.MouseButtonPress, pts[0], Qt.LeftButton)
+    for p in pts[1:]:
+        mouse(QEvent.MouseMove, p, Qt.LeftButton)
+    shot("lasso_drawing")
+    t = time.time()  # release -> selection
+    mouse(QEvent.MouseButtonRelease, pts[-1], Qt.NoButton)
+    yield 0.05
+    yield lambda: tool._pending == 0
+    report["timings"]["lasso_to_selection_ms"] = round((time.time() - t) * 1000)
+    r_lasso = sel_rect(doc)
+    report["lasso"] = r_lasso
+    check("lasso selects the truck", r_lasso is not None and r_lasso[2] > W * 0.8 and r_lasso[3] > H * 0.4, r_lasso)
+    yield 1.0
+    shot("after_lasso")
+
+    # 6. hover preview
     settings.put("hoverPreview", True)
     tf = cv.image_to_widget(tool.view)
     p = tf.map(QPointF(W * 0.62, H * 0.52))
@@ -146,7 +171,7 @@ def steps():
     check("hover preview", tool.overlay.preview is not None)
     shot("hover")
 
-    # 6. leave via another tool
+    # 7. leave via another tool
     brush = tool.toolbox.toolbox.findChild(QToolButton, "KritaShape/KisToolBrush")
     if brush is not None:
         brush.click()

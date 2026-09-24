@@ -156,7 +156,7 @@ class Sam3Engine:
         # Touch every path once so MLX compiles its kernels before the first real prompt.
         self.predict_point(state, [(0.5, 0.5, 1)])
         self.predict_box(state, (0.25, 0.25, 0.75, 0.75))
-        self.predict_objects_in_box(state, (0.1, 0.1, 0.9, 0.9))
+        self.predict_objects_in_region(state, [(0.2, 0.1), (0.9, 0.3), (0.7, 0.9), (0.1, 0.7)])
         self.predict_text(state, "object")
         render_mask(np.full((LOW_RES, LOW_RES), 5.0, np.float32), 64, 64)
         self.images.pop("__warmup__", None)
@@ -279,80 +279,114 @@ class Sam3Engine:
         mx.eval(masks, iou)
         return MaskResult(np.array(masks[0, 0].astype(mx.float32)), float(iou[0, 0]), 1)
 
-    def predict_objects_in_box(
+    def predict_objects_in_box(self, state: ImageState, box, **kw) -> MaskResult:
+        u0, v0, u1, v1 = box
+        return self.predict_objects_in_region(state, [(u0, v0), (u1, v0), (u1, v1), (u0, v1)], **kw)
+
+    def predict_objects_in_region(self, state: ImageState, polygon, **kw) -> MaskResult:
+        """Every object inside a lasso polygon (normalised u, v points): their union."""
+        found = self._region_objects(state, polygon, **kw)
+        if found is None:
+            return MaskResult(None, 0.0, 0)
+        cand, score, kept, _area = found
+        union = mx.max(cand[mx.array(kept)], axis=0)  # soft union: max of logits
+        return MaskResult(np.array(union), float(score[kept[0]]), len(kept))
+
+    def predict_main_in_region(self, state: ImageState, polygon, **kw) -> MaskResult:
+        """The dominant object inside a lasso: the largest good object that fits in it."""
+        found = self._region_objects(state, polygon, **kw)
+        if found is None:
+            return MaskResult(None, 0.0, 0)
+        cand, score, kept, area = found
+        main = max(kept, key=lambda i: (area[i], score[i]))
+        return MaskResult(np.array(cand[main]), float(score[main]), 1)
+
+    def _region_objects(
         self,
         state: ImageState,
-        box,
+        polygon,
         min_iou: float = 0.75,
         min_stability: float = 0.85,
         min_inside: float = 0.8,
         chunk: int = 32,
-    ) -> MaskResult:
-        """Every object that lies (mostly) inside a box.
+    ):
+        """Candidate objects that lie (mostly) inside a lasso.
 
-        Combines the box prompt's own mask with a grid of single-point prompts
-        inside the box (automatic-mask-generator style). Candidates that spill
-        out of the box are treated as background and dropped, the rest are
-        de-duplicated and unioned.
+        Automatic-mask-generator style: single-point prompts on a grid inside
+        the lasso (3 masks each) plus a box prompt on the lasso's bounds, all
+        held to the same quality bar (predicted IoU, stability) and required to
+        lie mostly inside the lasso - anything spilling out is background. A
+        loose lasso's box prompt usually fails that bar, which is intended: box
+        prompts are only reliable for tight boxes.
+
+        Returns ``(candidates, scores, kept, areas)`` with ``kept`` the
+        de-duplicated indices in descending score order, or None.
         """
-        u0, v0, u1, v1 = box
-        best = self.predict_box(state, box)
         R = LOW_RES
-        x0, x1 = int(math.floor(u0 * R)), int(math.ceil(u1 * R))
-        y0, y1 = int(math.floor(v0 * R)), int(math.ceil(v1 * R))
-        box_np = np.zeros((R, R), np.float32)
-        box_np[max(y0, 0) : max(y1, 1), max(x0, 0) : max(x1, 1)] = 1.0
-        box_mask = mx.array(box_np)
+        region_np = region_mask(polygon, R)
+        if not region_np.any():
+            return None
+        region = mx.array(region_np.astype(np.float32))
+        u0, v0, u1, v1 = _bounds(polygon)
 
-        # Point grid: 4-12 samples along each side, scaled with box size.
-        side_u = max(u1 - u0, 1e-6)
-        side_v = max(v1 - v0, 1e-6)
+        # Point grid over the lasso's bounds (4-12 per side, by size), keeping
+        # only points inside the lasso; refine the grid for thin lassos.
+        side_u, side_v = max(u1 - u0, 1e-6), max(v1 - v0, 1e-6)
         n_u = int(np.clip(round(side_u * 16), 4, 12))
         n_v = int(np.clip(round(side_v * 16), 4, 12))
-        us = u0 + (np.arange(n_u) + 0.5) / n_u * side_u
-        vs = v0 + (np.arange(n_v) + 0.5) / n_v * side_v
-        grid = np.array([(u, v) for v in vs for u in us], np.float32)
+        grid = np.zeros((0, 2), np.float32)
+        for _ in range(3):
+            us = u0 + (np.arange(n_u) + 0.5) / n_u * side_u
+            vs = v0 + (np.arange(n_v) + 0.5) / n_v * side_v
+            cand_pts = np.array([(u, v) for v in vs for u in us], np.float32)
+            ix = np.clip((cand_pts * R).astype(int), 0, R - 1)
+            grid = cand_pts[region_np[ix[:, 1], ix[:, 0]]]
+            if len(grid) >= 6:
+                break
+            n_u, n_v = n_u * 2, n_v * 2
 
-        # Decode every grid point (3 masks each) and filter on the GPU; only
-        # candidate statistics come back to the CPU.
-        pools, scores = [], []
-        if best.score >= min_iou * 0.8:
-            pools.append(mx.array(best.logits)[None])
-            scores.append(np.array([best.score + 1.0], np.float32))  # the box prompt wins ties
-        for i in range(0, len(grid), chunk):
-            g = grid[i : i + chunk] * IMAGE_SIZE
-            pts = np.concatenate([g[:, None, :], np.ones((len(g), 1, 1), np.float32)], axis=-1)
-            masks, iou = self._decode(state, self._embed_prompts(points=pts), multimask=True)
-            masks = masks.astype(mx.float32).reshape(-1, R, R)
-            iou = iou.reshape(-1)
+        def keep(masks, iou):
+            """Filter (n, R, R) logits on the GPU; returns kept masks and their scores."""
             fg = masks > 0
             area = fg.sum(axis=(-2, -1))
-            inside = (fg * box_mask).sum(axis=(-2, -1)) / mx.maximum(area, 1)
+            inside = (fg * region).sum(axis=(-2, -1)) / mx.maximum(area, 1)
             stability = (masks > 1.0).sum(axis=(-2, -1)) / mx.maximum((masks > -1.0).sum(axis=(-2, -1)), 1)
             ok = (iou >= min_iou) & (stability >= min_stability) & (area >= 16) & (inside >= min_inside) & (area <= 0.6 * R * R)
             mx.eval(ok, iou, stability)
             idx = np.flatnonzero(np.array(ok))
-            if len(idx):
-                pools.append(masks[mx.array(idx)])
-                scores.append(np.array(iou)[idx] * np.array(stability)[idx])
+            if not len(idx):
+                return None, None
+            return masks[mx.array(idx)], np.array(iou)[idx] * np.array(stability)[idx]
+
+        pools, scores = [], []
+        best = self.predict_box(state, (u0, v0, u1, v1))
+        masks, sc = keep(mx.array(best.logits)[None], mx.array([best.score], dtype=mx.float32))
+        if masks is not None:
+            pools.append(masks)
+            scores.append(sc + 1.0)  # a good box-prompt mask wins ties
+        for i in range(0, len(grid), chunk):
+            g = grid[i : i + chunk] * IMAGE_SIZE
+            pts = np.concatenate([g[:, None, :], np.ones((len(g), 1, 1), np.float32)], axis=-1)
+            masks, iou = self._decode(state, self._embed_prompts(points=pts), multimask=True)
+            masks, sc = keep(masks.astype(mx.float32).reshape(-1, R, R), iou.reshape(-1))
+            if masks is not None:
+                pools.append(masks)
+                scores.append(sc)
         if not pools:
-            return MaskResult(None, 0.0, 0)
+            return None
         cand = mx.concatenate(pools)
         score = np.concatenate(scores)
-        order = np.argsort(-score)
-        # Greedy mask-NMS on foreground IoU (pairwise IoU via one matmul), then
-        # a soft union: the max of the kept logits.
+        # Greedy mask-NMS on foreground IoU (pairwise IoU via one matmul).
         fg = (cand > 0).reshape(cand.shape[0], -1).astype(mx.float16)
         inter = fg @ fg.T
         area = fg.sum(axis=1).astype(mx.float32)
         iou_mat = inter.astype(mx.float32) / mx.maximum(area[:, None] + area[None, :] - inter.astype(mx.float32), 1)
-        iou_np = np.array(iou_mat)
+        iou_np, area_np = np.array(iou_mat), np.array(area)
         kept: list[int] = []
-        for i in order:
+        for i in np.argsort(-score):
             if all(iou_np[i, k] <= 0.7 for k in kept):
                 kept.append(int(i))
-        union = mx.max(cand[mx.array(kept)], axis=0)
-        return MaskResult(np.array(union), float(score[order[0]]), len(kept))
+        return cand, score, kept, area_np
 
     # ------------------------------------------------------------------- text
 
@@ -412,6 +446,26 @@ class Sam3Engine:
         if masks.shape[-1] != LOW_RES:
             masks = np.array(_resize_bilinear(mx.array(masks), LOW_RES, LOW_RES))
         return MaskResult(np.maximum.reduce(list(masks)), float(scores_np[keep].max()), len(keep))
+
+
+# ------------------------------------------------------------------ regions
+
+
+def _bounds(polygon):
+    pts = np.asarray(polygon, np.float32).reshape(-1, 2)
+    lo, hi = np.clip(pts.min(axis=0), 0, 1), np.clip(pts.max(axis=0), 0, 1)
+    return float(lo[0]), float(lo[1]), float(hi[0]), float(hi[1])
+
+
+def region_mask(polygon, size: int = LOW_RES) -> np.ndarray:
+    """Rasterise a closed polygon of normalised (u, v) points to a (size, size) bool mask."""
+    from PIL import Image, ImageDraw
+
+    img = Image.new("L", (size, size), 0)
+    pts = [(float(u) * size, float(v) * size) for u, v in np.asarray(polygon, np.float32).reshape(-1, 2)]
+    if len(pts) >= 3:
+        ImageDraw.Draw(img).polygon(pts, fill=1, outline=1)
+    return np.asarray(img, dtype=bool)
 
 
 # ----------------------------------------------------------------- rendering

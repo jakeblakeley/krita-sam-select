@@ -1,19 +1,21 @@
-"""Cursors in the style of Krita's selection tools, marked with a sparkle.
+"""Cursors in the style of Krita's Freehand Selection tool, marked with a sparkle.
 
-Krita's selection cursors (crosshair at 6,6 plus a dotted badge showing the
-mode) are compiled into the selection-tools plugin as Qt resources, e.g.
-``:/tool_rectangular_selection_cursor_add.png``. We reuse them so the mode
-feedback is pixel-identical to the built-in tools, and add a small sparkle to
-tell SAM Select apart. If the resources are missing, draw an equivalent.
+Krita's selection cursors are compiled into the selection-tools plugin as Qt
+resources, e.g. ``:/tool_outline_selection_cursor_add.png`` (an arrow with a
+dotted lasso badge showing the mode, hotspot 5,5 in kis_tool_select_outline).
+We reuse them so the mode feedback is identical to the freehand lasso, and add
+a small sparkle to tell SAM Select apart. If the resources are missing, draw
+an equivalent.
 """
 
 from __future__ import annotations
 
 from PyQt5.QtCore import QPointF, Qt
-from PyQt5.QtGui import QColor, QCursor, QPainter, QPainterPath, QPen, QPixmap
+from PyQt5.QtGui import QColor, QCursor, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 
 from . import modes
 
+HOTSPOT = (5, 5)
 _SUFFIX = {
     modes.REPLACE: "",
     modes.ADD: "_add",
@@ -35,28 +37,29 @@ def _sparkle(p: QPainter, cx: float, cy: float, r: float) -> None:
 
 
 def _fallback(mode: str) -> QPixmap:
+    """Arrow + dotted lasso badge, like tool_outline_selection_cursor*.png."""
     pm = QPixmap(32, 32)
     pm.fill(Qt.transparent)
     p = QPainter(pm)
-    for color, width in ((QColor(0, 0, 0), 3), (QColor(255, 255, 255), 1)):
-        p.setPen(QPen(color, width))
-        p.drawLine(6, 0, 6, 12)
-        p.drawLine(0, 6, 12, 6)
-    if mode != modes.REPLACE:
-        p.setPen(QPen(QColor(0, 0, 0), 1, Qt.DotLine))
-        p.setBrush(QColor(255, 255, 255, 200))
-        p.drawRect(16, 16, 14, 14)
-        p.setPen(QPen(QColor(0, 0, 0), 2))
-        c = QPointF(23, 23)
-        if mode in (modes.ADD, modes.SUBTRACT):
-            p.drawLine(c + QPointF(-4, 0), c + QPointF(4, 0))
-        if mode == modes.ADD:
-            p.drawLine(c + QPointF(0, -4), c + QPointF(0, 4))
-        if mode == modes.INTERSECT:
-            p.drawLine(c + QPointF(-3, -3), c + QPointF(3, 3))
-            p.drawLine(c + QPointF(-3, 3), c + QPointF(3, -3))
-        if mode == modes.SYMMETRIC_DIFFERENCE:
-            p.drawPolygon(c + QPointF(0, -4), c + QPointF(4, 3), c + QPointF(-4, 3))
+    p.setRenderHint(QPainter.Antialiasing)
+    arrow = QPolygonF([QPointF(5, 5), QPointF(5, 16), QPointF(8, 13), QPointF(10, 17), QPointF(12, 16), QPointF(10, 12), QPointF(14, 12)])
+    p.setPen(QPen(QColor(255, 255, 255), 1.5))
+    p.setBrush(QColor(0, 0, 0))
+    p.drawPolygon(arrow)
+    p.setPen(QPen(QColor(0, 0, 0), 1, Qt.DotLine))
+    p.setBrush(QColor(255, 255, 255, 170))
+    p.drawEllipse(QPointF(23, 23), 7, 5)
+    p.setPen(QPen(QColor(0, 0, 0), 1.6))
+    c = QPointF(23, 23)
+    if mode in (modes.ADD, modes.SUBTRACT):
+        p.drawLine(c + QPointF(-3, 0), c + QPointF(3, 0))
+    if mode == modes.ADD:
+        p.drawLine(c + QPointF(0, -3), c + QPointF(0, 3))
+    if mode == modes.INTERSECT:
+        p.drawLine(c + QPointF(-2.5, -2.5), c + QPointF(2.5, 2.5))
+        p.drawLine(c + QPointF(-2.5, 2.5), c + QPointF(2.5, -2.5))
+    if mode == modes.SYMMETRIC_DIFFERENCE:
+        p.drawPolygon(QPolygonF([c + QPointF(0, -3), c + QPointF(3, 2.5), c + QPointF(-3, 2.5)]))
     p.end()
     return pm
 
@@ -64,14 +67,11 @@ def _fallback(mode: str) -> QPixmap:
 def cursor(mode: str) -> QCursor:
     if mode in _cache:
         return _cache[mode]
-    pm = QPixmap(f":/tool_rectangular_selection_cursor{_SUFFIX.get(mode, '')}.png")
-    if pm.isNull():
-        pm = _fallback(mode)
-    else:
-        pm = pm.copy()
+    pm = QPixmap(f":/tool_outline_selection_cursor{_SUFFIX.get(mode, '')}.png")
+    pm = _fallback(mode) if pm.isNull() else pm.copy()
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing)
-    _sparkle(p, 17.5, 4.5, 4.0)
+    _sparkle(p, 19.0, 5.5, 4.0)
     p.end()
-    _cache[mode] = QCursor(pm, 6, 6)
+    _cache[mode] = QCursor(pm, *HOTSPOT)
     return _cache[mode]

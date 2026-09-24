@@ -6,6 +6,7 @@ backend into ~/Library/Application Support/SamSelect if it isn't there yet.
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 import time
@@ -130,16 +131,18 @@ def main() -> int:
     sel = doc.selections[-1]
     check(sel.ops[0] == ("duplicate",) and ("add", "Selection") in sel.ops, f"combined with add ({sel.ops[:3]})")
 
-    print("option+drag (subtract) around the blue disc")
-    a, b = widget_pos(view, 720, 250), widget_pos(view, 1020, 550)
-    mouse(canvas, QEvent.MouseButtonPress, a, mods=Qt.AltModifier)
-    mouse(canvas, QEvent.MouseMove, QPointF(a.x() + 20, a.y() + 20), buttons=Qt.LeftButton, mods=Qt.AltModifier)
-    check(tool.overlay.drag_polygon is not None, "drag rectangle drawn")
-    mouse(canvas, QEvent.MouseMove, b, buttons=Qt.LeftButton, mods=Qt.AltModifier)
-    mouse(canvas, QEvent.MouseButtonRelease, b, mods=Qt.AltModifier)
-    check(wait_selection(3), "drag produced a selection")
+    print("option+lasso (subtract) around the blue disc")
+    ring = [widget_pos(view, 870 + 170 * math.cos(a), 400 + 170 * math.sin(a)) for a in (i * 2 * math.pi / 40 for i in range(41))]
+    mouse(canvas, QEvent.MouseButtonPress, ring[0], mods=Qt.AltModifier)
+    for pt in ring[1:20]:
+        mouse(canvas, QEvent.MouseMove, pt, buttons=Qt.LeftButton, mods=Qt.AltModifier)
+    check(tool.overlay.lasso is not None and tool.overlay.lasso.count() > 10, "freehand lasso path drawn")
+    for pt in ring[20:]:
+        mouse(canvas, QEvent.MouseMove, pt, buttons=Qt.LeftButton, mods=Qt.AltModifier)
+    mouse(canvas, QEvent.MouseButtonRelease, ring[-1], mods=Qt.AltModifier)
+    check(wait_selection(3), "lasso produced a selection")
     check(("subtract", "Selection") in doc.selections[-1].ops, "combined with subtract")
-    check(tool.overlay.drag_polygon is None, "drag rectangle cleared")
+    check(tool.overlay.lasso is None, "lasso path cleared")
 
     print("text prompt (shift+return = add)")
     tool.prompt.edit.setFocus()
