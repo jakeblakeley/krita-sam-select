@@ -16,7 +16,6 @@ import types
 from PyQt5.QtCore import QObject, QRect, QSize, Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QIcon, QImage, QPainter, QTransform
 from PyQt5.QtWidgets import (
-    QAbstractButton,
     QAbstractScrollArea,
     QAction,
     QButtonGroup,
@@ -26,6 +25,7 @@ from PyQt5.QtWidgets import (
     QLayout,
     QMainWindow,
     QMdiArea,
+    QPushButton,
     QScrollArea,
     QToolButton,
     QVBoxLayout,
@@ -281,28 +281,27 @@ class KisOpenGLCanvas2(QWidget):
     pass
 
 
-class KisSelectionActionsPanelButton(QAbstractButton):
-    """Like Krita's: an invisible hit area; the canvas paints the visuals."""
-
-    def paintEvent(self, event):
-        pass
-
-
-class KisSelectionActionsPanelHandle(QWidget):
-    pass
-
-
 def add_actions_bar(canvas, x, y, buttons=7, size=30):
-    """Krita's selection actions bar: buttons + drag handle, children of the canvas."""
+    """Krita's selection actions bar: buttons + drag handle, children of the canvas.
+
+    Like the real KisSelectionActionsPanelButton/Handle, these expose no class
+    name of their own (Krita's classes lack Q_OBJECT, so at runtime they are
+    just "QAbstractButton"/"QWidget"): only the long-press property on the
+    buttons and the open-hand cursor on the handle identify them.
+    """
     widgets = []
     for i in range(buttons):
-        b = KisSelectionActionsPanelButton(canvas)
+        b = QPushButton(canvas)
+        b.setFlat(True)
         b.setFixedSize(size, size)
+        b.setCursor(Qt.PointingHandCursor)
+        b.setProperty("KRITA_LONG_PRESS", True)
         b.move(x + i * size, y)
         b.show()
         widgets.append(b)
-    h = KisSelectionActionsPanelHandle(canvas)
+    h = QWidget(canvas)
     h.setFixedSize(size, size)
+    h.setCursor(Qt.OpenHandCursor)
     h.move(x + buttons * size, y)
     h.show()
     widgets.append(h)

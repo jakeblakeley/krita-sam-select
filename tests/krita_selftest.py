@@ -109,7 +109,7 @@ def steps():
     # 1b. Krita's selection actions bar (if enabled) stays on top and keeps its input
     tool.canvas.repaint()
     yield 0.2
-    bar_widgets = [w for w in tool.canvas.children() if cv.is_actions_bar_widget(w) and w.isVisible()]
+    bar_widgets = [w for w in tool.canvas.children() if cv.is_actions_bar_widget(w, tool.canvas) and w.isVisible()]
     report["actions_bar"] = {"widgets": len(bar_widgets), "exclude": str(tool.overlay.exclude)}
     if bar_widgets:
         check("overlay excludes the actions bar", tool.overlay.exclude is not None and tool.overlay.exclude.contains(bar_widgets[0].geometry()))

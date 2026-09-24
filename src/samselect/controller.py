@@ -48,6 +48,7 @@ RELEASE = {QEvent.MouseButtonRelease, QEvent.TabletRelease}
 POINTER = PRESS | MOVE | RELEASE
 TABLET = {QEvent.TabletPress, QEvent.TabletMove, QEvent.TabletRelease}
 KEYS = {QEvent.KeyPress, QEvent.KeyRelease}
+GEOMETRY = {QEvent.Show, QEvent.Hide, QEvent.Move, QEvent.Resize}
 MODIFIER_KEYS = {Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt, Qt.Key_Meta}
 
 
@@ -92,6 +93,9 @@ class SamSelectTool(QObject):
         self._cursor_timer = QTimer(self)
         self._cursor_timer.setSingleShot(True)
         self._cursor_timer.timeout.connect(self._apply_cursor)
+        self._bar_timer = QTimer(self)
+        self._bar_timer.setSingleShot(True)
+        self._bar_timer.timeout.connect(self._sync_bar)
         self._stroke_watchdog = QTimer(self)
         self._stroke_watchdog.setInterval(120)
         self._stroke_watchdog.timeout.connect(self._check_stroke)
@@ -290,8 +294,10 @@ class SamSelectTool(QObject):
                 self._end_stroke()
             return False
         if obj is not self.canvas:
-            if t == QEvent.Enter and cv.is_actions_bar_widget(obj):
+            if t == QEvent.Enter and cv.is_actions_bar_widget(obj, self.canvas):
                 self._clear_hover()  # pointer moved onto Krita's selection actions bar
+            elif t in GEOMETRY and self.overlay is not None and cv.is_actions_bar_widget(obj, self.canvas):
+                self._bar_timer.start(0)  # the bar appeared, moved or hid
             return False
         if t in POINTER:
             try:
@@ -330,8 +336,13 @@ class SamSelectTool(QObject):
         if tf != self.overlay.image_to_widget:
             self.overlay.image_to_widget = tf
             self.overlay.update()
-        # Krita's selection actions bar is painted by the canvas, so it would
-        # sit under our overlay: paint around it and keep the text box clear.
+        self._sync_bar()
+
+    def _sync_bar(self) -> None:
+        """Krita's selection actions bar is painted by the canvas, i.e. under our
+        overlay: repaint around it when it changes and keep the text box clear."""
+        if self.overlay is None:
+            return
         bar = cv.actions_bar_rect(self.canvas)
         if bar != self.overlay.exclude:
             self.overlay.exclude = bar

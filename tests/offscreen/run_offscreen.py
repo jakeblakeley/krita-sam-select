@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from PyQt5.QtCore import QEvent, QPoint, QPointF, Qt  # noqa: E402
 from PyQt5.QtGui import QKeyEvent, QMouseEvent, QTabletEvent  # noqa: E402
-from PyQt5.QtWidgets import QAction, QApplication, QToolButton  # noqa: E402
+from PyQt5.QtWidgets import QAction, QApplication, QPushButton, QToolButton  # noqa: E402
 
 import fake_krita  # noqa: E402
 
@@ -245,11 +245,13 @@ def main() -> int:
     check(tool._press is None and tool.overlay.lasso is None, "Escape cancels")
 
     print("Krita's selection actions bar takes priority")
+    decoy = QPushButton(canvas)  # an unrelated canvas child: must not count as the bar
+    decoy.setGeometry(600, 600, 30, 30)
+    decoy.show()
     bar = fake_krita.add_actions_bar(canvas, 180, 150)
-    canvas.repaint()  # Krita repaints the canvas when the bar appears
-    pump(0.05)
+    pump(0.05)  # no canvas repaint: showing the bar's widgets must be enough
     expect = bar[0].geometry().united(bar[-1].geometry()).adjusted(-6, -6, 6, 6)
-    check(tool.overlay.exclude == expect, f"overlay knows where the bar is ({tool.overlay.exclude})")
+    check(tool.overlay.exclude == expect, f"overlay finds the bar by Krita's markers, not class names ({tool.overlay.exclude})")
 
     def deliver(kind, pt, mods=Qt.NoModifier):
         # Route like Qt: the widget under the pointer gets it (transparent overlays skipped).
@@ -281,14 +283,14 @@ def main() -> int:
     mouse(canvas, QEvent.MouseMove, in_margin, button=Qt.NoButton, buttons=Qt.NoButton)
     check(tool.overlay.preview is None, "hovering the bar clears the preview")
 
-    for w in bar:  # move the bar onto the text box
+    for w in bar:  # drag the bar onto the text box (no canvas repaint)
         w.move(w.x() - 180 + (canvas.width() - 8 * 30) // 2, canvas.height() - 40)
-    canvas.repaint()
     pump(0.05)
+    moved = bar[0].geometry().united(bar[-1].geometry()).adjusted(-6, -6, 6, 6)
+    check(tool.overlay.exclude == moved, "the hole follows the bar when it moves")
     check(not tool.prompt.geometry().intersects(tool.overlay.exclude), f"text box moves clear of the bar ({tool.prompt.geometry()} vs {tool.overlay.exclude})")
     for w in bar:
         w.hide()
-    canvas.repaint()
     pump(0.05)
     check(tool.overlay.exclude is None and tool.prompt.geometry().bottom() > canvas.height() - 40, "bar hidden: overlay and text box return to normal")
 

@@ -14,6 +14,8 @@ from PyQt5.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt, QTimer, pyqt
 from PyQt5.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPolygonF, QTransform
 from PyQt5.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit, QToolButton, QWidget
 
+from . import canvas as cv
+
 PLACEHOLDER = "type what to select"
 
 
@@ -106,6 +108,9 @@ class CanvasOverlay(QWidget):
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        # Krita paints its selection actions bar into the canvas, i.e. under
+        # us: leave a hole where it is, so it reads as being on top.
+        self.exclude = cv.actions_bar_rect(self.parentWidget())
         if self.exclude is not None:
             visible = QPainterPath()
             visible.addRect(QRectF(self.rect()))
