@@ -4,8 +4,6 @@
 
 ![SAM Select demo in Krita: selecting a kitten and a puppy in a photo](docs/demo.gif)
 
-<sub>▶ [Full-quality video (.mov)](https://github.com/jakeblakeley/krita-sam-select/releases/download/v0.3.2/krita-sam-select.mov)</sub>
-
 SAM Select adds a tool to Krita's toolbox, next to the built-in selection tools. It has three ways to select:
 
 | | Gesture | What gets selected |
