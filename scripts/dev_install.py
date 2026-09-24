@@ -2,12 +2,18 @@
 """Link the working tree into Krita for development (macOS).
 
     python3 scripts/dev_install.py            # symlink + enable the plugin
-    python3 scripts/dev_install.py --uninstall
+    python3 scripts/dev_install.py --uninstall  # remove the links (e.g. before importing a zip)
 
 Symlinks src/ into ~/Library/Application Support/krita/{pykrita,actions} so
 edits take effect on the next Krita restart, and sets
 ``[python] enable_samselect=true`` in kritarc (a backup is written first).
-Quit Krita before running it: Krita rewrites kritarc when it exits.
+Quit Krita before installing: Krita rewrites kritarc when it exits.
+
+Remove the links before importing a release zip: Krita's importer can't
+replace a symlinked plugin folder, and would write through the other links
+into src/. Uninstalling works while Krita is running (the running session
+keeps the code it already loaded) and leaves the plugin enabled, so an
+imported zip takes over on the next start.
 """
 
 from __future__ import annotations
@@ -56,23 +62,31 @@ def main() -> int:
     parser.add_argument("--uninstall", action="store_true")
     parser.add_argument("--force", action="store_true", help="run even if Krita is running")
     args = parser.parse_args()
-    if krita_running() and not args.force:
-        sys.exit("Krita is running. Quit it first (it rewrites kritarc on exit), or pass --force.")
-
-    for link, target in LINKS.items():
-        if link.is_symlink() or link.exists():
+    if args.uninstall:
+        for link in LINKS:
             if link.is_symlink():
                 link.unlink()
-            elif link.is_dir():
-                shutil.rmtree(link)
-            else:
-                link.unlink()
-        if not args.uninstall:
-            link.parent.mkdir(parents=True, exist_ok=True)
-            link.symlink_to(target)
-            print(f"linked {link} -> {target}")
-    set_enabled(not args.uninstall)
-    print("done; start Krita" if not args.uninstall else "uninstalled")
+                print(f"removed link {link}")
+            elif link.exists():
+                print(f"left {link} alone (not a dev link; installed from a zip?)")
+        print("uninstalled the dev links; the plugin stays enabled for an imported zip")
+        return 0
+
+    if krita_running() and not args.force:
+        sys.exit("Krita is running. Quit it first (it rewrites kritarc on exit), or pass --force.")
+    for link, target in LINKS.items():
+        if link.is_symlink():
+            link.unlink()
+        elif link.is_dir():
+            print(f"replacing installed copy {link}")
+            shutil.rmtree(link)
+        elif link.exists():
+            link.unlink()
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(target)
+        print(f"linked {link} -> {target}")
+    set_enabled(True)
+    print("done; start Krita")
     return 0
 
 

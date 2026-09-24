@@ -107,7 +107,9 @@ python3 scripts/build_zip.py                     # -> dist/samselect-v<version>.
 python3 scripts/build_zip.py --copy-to ~/Desktop
 ```
 
-Each version is written once. To make a new one, bump `src/samselect/version.py` first, so `dist/` keeps every build. The zip has the layout Krita's importer expects: `samselect.desktop`, `samselect.action` and `samselect/`.
+Each version is written once. To make a new one, bump `src/samselect/version.py` first, so `dist/` keeps every build. The zip has the layout Krita's importer expects: `samselect.desktop`, `samselect.action` and `samselect/`, including explicit folder entries (the importer finds the plugin by its `samselect/` entry). Every build is installed into a scratch folder with Krita's own importer before it's kept, so a zip Krita would reject never reaches `dist/`.
+
+If you use the dev install, run `python3 scripts/dev_install.py --uninstall` before importing a zip: Krita's importer can't replace the symlinked plugin folder.
 
 ## Project layout
 
