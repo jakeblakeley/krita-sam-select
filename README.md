@@ -2,6 +2,10 @@
 
 **Object selection for Krita powered by Meta's [Segment Anything 3](https://ai.meta.com/sam3/), running locally on Apple Silicon.**
 
+![SAM Select in Krita: typing "cat" selects the kitten, then clicks and a rough lasso add to the selection](docs/demo.gif)
+
+<sub>▶ [Full-quality video (.mov)](https://github.com/jakeblakeley/krita-sam-select/releases/download/v0.3.2/krita-sam-select.mov)</sub>
+
 SAM Select adds a tool to Krita's toolbox, next to the built-in selection tools. It has three ways to select:
 
 | | Gesture | What gets selected |
@@ -36,7 +40,7 @@ Canvas navigation still works while the tool is active: Space+drag, pinch, scrol
 
 ## Install
 
-1. Download `samselect-vX.Y.Z.zip` (built into `dist/`, see [Building](#building-a-release-zip)).
+1. Download `samselect-vX.Y.Z.zip` from the [latest release](https://github.com/jakeblakeley/krita-sam-select/releases/latest).
 2. In Krita, choose **Tools › Scripts › Import Python Plugin from File…** and pick the zip.
 3. Restart Krita, then check that **Settings › Configure Krita › Python Plugin Manager › SAM Select** is enabled.
 4. Pick **SAM Select** in the toolbox (or press **W**). In **Tool Options**, click **Install SAM 3…**.
@@ -107,7 +111,7 @@ python3 scripts/build_zip.py                     # -> dist/samselect-v<version>.
 python3 scripts/build_zip.py --copy-to ~/Desktop
 ```
 
-Each version is written once. To make a new one, bump `src/samselect/version.py` first, so `dist/` keeps every build. The zip has the layout Krita's importer expects: `samselect.desktop`, `samselect.action` and `samselect/`, including explicit folder entries (the importer finds the plugin by its `samselect/` entry). Every build is installed into a scratch folder with Krita's own importer before it's kept, so a zip Krita would reject never reaches `dist/`.
+Each version is written once. To make a new one, bump `src/samselect/version.py` first, so `dist/` keeps every build. Publish it by attaching the zip to a GitHub release (`gh release create vX.Y.Z dist/samselect-vX.Y.Z.zip`). The zip has the layout Krita's importer expects: `samselect.desktop`, `samselect.action` and `samselect/`, including explicit folder entries (the importer finds the plugin by its `samselect/` entry). Every build is installed into a scratch folder with Krita's own importer before it's kept, so a zip Krita would reject never reaches `dist/`.
 
 If you use the dev install, run `python3 scripts/dev_install.py --uninstall` before importing a zip: Krita's importer can't replace the symlinked plugin folder.
 
@@ -126,7 +130,8 @@ src/
     backend.py       installer, server process, request queue
     server/          runs in the backend venv: engine.py, sam_server.py, protocol.py
 scripts/            build_zip.py, dev_install.py
-tests/              logic, server and offscreen plugin tests
+tests/              logic, server, offscreen and in-Krita tests
+docs/               demo
 ```
 
 ## Limitations
