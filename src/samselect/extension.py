@@ -19,22 +19,30 @@ class SamSelectExtension(Extension):
     def __init__(self, parent) -> None:
         super().__init__(parent)
         self.tools: dict[int, object] = {}
+        self._selftest_done = False
 
     def setup(self) -> None:
         notifier = Krita.instance().notifier()
         notifier.setActive(True)
-        notifier.windowCreated.connect(self._on_window_created)
+        notifier.windowCreated.connect(self._sync_windows)
         notifier.applicationClosing.connect(bk.Backend.instance().shutdown)
 
     def createActions(self, window) -> None:
+        # `window` is only valid during this call (Krita deletes the wrapper
+        # afterwards), so never capture it: resolve the window at trigger time.
         tool_action = window.createAction("samselect_tool", "SAM Select Tool", "tools/scripts")
-        tool_action.triggered.connect(lambda: self._tool(window).activate())
+        tool_action.triggered.connect(lambda *_: self._activate_in_active_window())
         setup_action = window.createAction("samselect_install", "SAM Select: Install or Repair Backend…", "tools/scripts")
-        setup_action.triggered.connect(bk.Backend.instance().install)
+        setup_action.triggered.connect(lambda *_: bk.Backend.instance().install())
         # The toolbox and dockers exist once the window has finished building.
-        QTimer.singleShot(0, lambda: self._tool(window))
+        QTimer.singleShot(0, self._sync_windows)
 
-    def _on_window_created(self) -> None:
+    def _activate_in_active_window(self) -> None:
+        window = Krita.instance().activeWindow()
+        if window is not None:
+            self._tool(window).activate()
+
+    def _sync_windows(self) -> None:
         for window in Krita.instance().windows():
             self._tool(window)
 
@@ -45,11 +53,12 @@ class SamSelectExtension(Extension):
         key = _key(qwindow)
         tool = self.tools.get(key)
         if tool is None:
-            tool = SamSelectTool(window)
+            tool = SamSelectTool(window)  # keeps this (Python-owned) Window wrapper alive
             self.tools[key] = tool
             qwindow.destroyed.connect(lambda *_: self.tools.pop(key, None))
             script = os.environ.get("SAMSELECT_SELFTEST")
-            if script:
+            if script and not self._selftest_done:
+                self._selftest_done = True
                 QTimer.singleShot(1500, lambda: _run_selftest(script, tool))
         return tool
 

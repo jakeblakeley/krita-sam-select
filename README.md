@@ -45,14 +45,15 @@ Canvas navigation still works while the tool is active: Space+drag, pinch, scrol
 
 ## Performance
 
-These numbers were measured on an M5 Pro with the bf16 weights, and include the round trip between Krita and the backend.
+These numbers were measured on an M5 Pro with the bf16 weights, using an 1800×1200 photo in Krita 5.3.3.
 
 | Step | Time |
 |---|---|
+| Backend start (model already downloaded) | ~2 to 3.5 s, once per session |
 | Encode a new image (once per image state, cached) | ~0.4 to 0.8 s |
-| Click → selection | ~10 ms |
-| Hover preview | ~10 ms |
-| Text prompt → selection | ~0.15 to 0.3 s |
+| Click → selection visible in Krita | ~0.15 s, of which inference is ~10 ms |
+| Hover preview | ~10 ms of inference per position |
+| Text prompt → selection in Krita | ~0.4 s |
 | Drag (all objects in box) | ~0.2 to 0.5 s |
 | Mask upscaled to an 8000×6000 canvas | ~40 ms |
 
@@ -89,7 +90,12 @@ tests/offscreen/run.sh                # drives the plugin in a fake Krita window
 ~/Library/Application\ Support/SamSelect/venv/bin/python tests/test_server.py   # backend end-to-end
 ```
 
-Setting `SAMSELECT_SELFTEST=/path/to/script.py` when launching Krita runs that script inside Krita once the window is ready. It's useful for scripted checks.
+Setting `SAMSELECT_SELFTEST=/path/to/script.py` when launching Krita runs that script inside Krita once the window is ready. [`tests/krita_selftest.py`](tests/krita_selftest.py) is a full in-Krita integration test. It opens an image, then clicks, undoes and redoes, types a text prompt, uses the modifiers and hovers. It saves screenshots and a report, then quits:
+
+```bash
+SAMSELECT_SELFTEST=$PWD/tests/krita_selftest.py SAMSELECT_SELFTEST_IMAGE=/path/to/photo.jpg \
+SAMSELECT_SELFTEST_OUT=/tmp/samselect-selftest /Applications/krita.app/Contents/MacOS/krita --nosplash
+```
 
 Logs are written to `~/Library/Logs/SamSelect/server.log`.
 

@@ -153,8 +153,12 @@ class Sam3Engine:
         t0 = time.perf_counter()
         rgb = np.full((IMAGE_SIZE, IMAGE_SIZE, 3), 127, np.uint8)
         state = self.set_image("__warmup__", rgb)
+        # Touch every path once so MLX compiles its kernels before the first real prompt.
         self.predict_point(state, [(0.5, 0.5, 1)])
         self.predict_box(state, (0.25, 0.25, 0.75, 0.75))
+        self.predict_objects_in_box(state, (0.1, 0.1, 0.9, 0.9))
+        self.predict_text(state, "object")
+        render_mask(np.full((LOW_RES, LOW_RES), 5.0, np.float32), 64, 64)
         self.images.pop("__warmup__", None)
         _log(f"warmup {time.perf_counter() - t0:.2f}s")
 
